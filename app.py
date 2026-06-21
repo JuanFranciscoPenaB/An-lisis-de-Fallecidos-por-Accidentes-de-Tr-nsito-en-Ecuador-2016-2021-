@@ -93,38 +93,22 @@ opcion = st.sidebar.radio(
 # =====================================================
 # CONEXIÓN MYSQL
 # =====================================================
-
 @st.cache_data
 def cargar_datos():
-
     try:
-        conexion= mysql.connector.connect(
-           host="localhost",
-           user="root",
-           password="Juan2026.",
-           database="transito_ecuador"
+        df = pd.read_csv(
+            "accidentes.csv",
+            sep=";",
+            encoding="latin1"
         )
 
-        consulta = """
-        SELECT *
-        FROM accidentes_transito
-        """
-
-        df = pd.read_sql(
-            consulta,
-            conexion
-        )
-
-        conexion.close()
+        # Eliminar espacios en nombres de columnas
+        df.columns = df.columns.str.strip()
 
         return df
 
     except Exception as e:
-
-        st.error(
-            f"Error de conexión: {e}"
-        )
-
+        st.error(f"Error al cargar CSV: {e}")
         return None
 
 # =====================================================
