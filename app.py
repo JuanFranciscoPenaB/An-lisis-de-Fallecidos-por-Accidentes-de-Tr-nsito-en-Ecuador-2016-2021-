@@ -533,5 +533,5 @@ st.markdown("""
 **Autor:** Juan Francisco Peña B.
 
 **Tecnologías:**
-Python · Streamlit · MySQL · Plotly · YData Profiling
+Python · Streamlit · CSV · Plotly · YData Profiling
 """)
