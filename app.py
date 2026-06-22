@@ -90,7 +90,7 @@ opcion = st.sidebar.radio(
 )
 
 # =====================================================
-# CONEXIÓN MYSQL
+# CARGA DE DATOS DESDE CSV
 # =====================================================
 @st.cache_data
 def cargar_datos():
@@ -104,17 +104,54 @@ def cargar_datos():
         # Eliminar espacios en nombres de columnas
         df.columns = df.columns.str.strip()
 
-        return df
+        # Guardar nombres originales (ANTES de renombrar)
+        columnas_antes = df.columns.tolist()
+
+        # ==========================================
+        # RENOMBRAR COLUMNAS
+        # ==========================================
+        df.rename(columns={
+                "Género de la víctima": "Genero_Victima",
+                "Tipo de accidente": "Tipo_Accidente",
+                "Fecha de muerte Víctima": "Fecha_Muerte"
+        }, inplace=True)
+
+        # Guardar nombres nuevos (DESPUÉS de renombrar)
+        columnas_despues = df.columns.tolist()
+
+        # ==========================================
+        # TRATAMIENTO DE VALORES NULOS
+        # ==========================================
+
+        columnas_numericas = df.select_dtypes(include="number").columns
+        df[columnas_numericas] = (
+           df[columnas_numericas]
+           .fillna(0)
+        )
+
+        columnas_texto = df.select_dtypes(include="object").columns
+        df[columnas_texto] = (
+           df[columnas_texto]
+           .fillna("No especificado")
+        )
+
+        # ==========================================
+        # ELIMINAR DUPLICADOS
+        # ==========================================
+        duplicados_encontrados = int(df.duplicated().sum())
+        df = df.drop_duplicates()
+
+        return df, columnas_antes, columnas_despues, duplicados_encontrados
 
     except Exception as e:
         st.error(f"Error al cargar CSV: {e}")
-        return None
+        return None, None, None, None
 
 # =====================================================
 # CARGA DE DATOS
 # =====================================================
 
-df = cargar_datos()
+df, columnas_antes, columnas_despues, duplicados_eliminados = cargar_datos()
 
 if df is None:
 
@@ -123,10 +160,9 @@ if df is None:
 
     Verifique:
 
-    • MySQL encendido.
-    • Base de datos transito_ecuador.
-    • Tabla accidentes_transito.
-    • Usuario y contraseña.
+    • Que el archivo accidentes.csv esté en la misma carpeta del script.
+    • Que el separador sea punto y coma (;).
+    • Que la codificación sea latin1.
     """)
 
     st.stop()
@@ -165,9 +201,38 @@ if opcion == "Inicio":
     )
 
     col4.metric(
-        "🔁 Duplicados",
-        int(df.duplicated().sum())
+        "🔁 Duplicados Eliminados",
+        duplicados_eliminados
     )
+
+    st.divider()
+
+    # ==========================================
+    # COMPARACIÓN DE NOMBRES DE COLUMNAS
+    # ANTES vs DESPUÉS DEL RENOMBRADO
+    # ==========================================
+
+    st.subheader("🔤 Nombres de Columnas: Antes y Después")
+
+    tabla_columnas = pd.DataFrame({
+        "Columna Original": columnas_antes,
+        "Columna Renombrada": columnas_despues
+    })
+
+    # Resaltar solo las filas donde el nombre cambió
+    def resaltar_cambios(fila):
+        if fila["Columna Original"] != fila["Columna Renombrada"]:
+            return ["background-color: #FFD60A; color: #000000; font-weight: 600"] * len(fila)
+        return [""] * len(fila)
+
+    st.dataframe(
+        tabla_columnas.style.apply(resaltar_cambios, axis=1),
+        use_container_width=True
+    )
+
+    cambios = (tabla_columnas["Columna Original"] != tabla_columnas["Columna Renombrada"]).sum()
+
+    st.info(f"Se renombraron {cambios} columna(s). Las filas resaltadas en amarillo muestran el cambio.")
 
 # =====================================================
 # TABLA
@@ -271,6 +336,7 @@ elif opcion == "Estadísticas":
         use_container_width=True
     )
 
+
     st.subheader("🔎 Últimos 5 Registros")
 
     st.dataframe(
@@ -278,9 +344,18 @@ elif opcion == "Estadísticas":
         use_container_width=True
     )
 
+    st.subheader("⚠️ Registros con Valores Nulos")
+    registros_nulos=df[df.isnull().any(axis=1)]
+    st.write(f"Total de registros con nulos: {len(registros_nulos)}")
+    st.dataframe(
+        registros_nulos,
+        use_container_width=True
+    )
+
+
     st.subheader("📈 Resumen General")
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4,col5,col6 = st.columns(6)
 
     with col1:
         st.metric(
@@ -305,7 +380,81 @@ elif opcion == "Estadísticas":
             "Duplicados",
             int(df.duplicated().sum())
         )
+    with col5:
+        st.metric(
+        "📂 Columnas con Nulos",
+        (df.isnull().sum() > 0).sum()
+    )
 
+    with col6:
+        st.metric(
+        "💾 Memoria (MB)",
+        round(
+            df.memory_usage(deep=True).sum() / 1024**2,
+            2
+        )
+    )
+    st.divider()
+
+    st.subheader("📌 Detección de Valores Atípicos")
+
+    columnas_numericas = df.select_dtypes(include="number").columns
+
+    if len(columnas_numericas) > 0:
+
+         variable = st.selectbox(
+        "Seleccione una variable numérica",
+        columnas_numericas
+     )
+
+         Q1 = df[variable].quantile(0.25)
+         Q3 = df[variable].quantile(0.75)
+
+         IQR = Q3 - Q1
+
+         limite_inferior = Q1 - (1.5 * IQR)
+         limite_superior = Q3 + (1.5 * IQR)
+
+         outliers = df[
+           (df[variable] < limite_inferior) |
+           (df[variable] > limite_superior)
+         ]
+
+         c1, c2, c3 = st.columns(3)
+
+         with c1:
+           st.metric("Q1", round(Q1, 2))
+
+         with c2:
+          st.metric("Q3", round(Q3, 2))
+
+         with c3:
+          st.metric(
+            "Outliers",
+            len(outliers)
+        )
+
+         st.dataframe(
+          outliers,
+          use_container_width=True
+         )
+
+    else:
+     st.warning(
+        "No existen columnas numéricas para analizar."
+     )
+
+    st.subheader("📥 Descargar Datos Limpios")
+
+    st.download_button(
+      "📥 Descargar CSV",
+      df.to_csv(
+          index=False,
+          sep=";"
+      ).encode("utf-8"),
+      "accidentes_limpio.csv",
+      "text/csv"
+    )
 # =====================================================
 # GRÁFICOS
 # =====================================================
@@ -341,6 +490,8 @@ elif opcion == "Gráficos":
         "Duplicados",
         int(df.duplicated().sum())
     )
+
+
 
     st.divider()
 
@@ -385,12 +536,12 @@ elif opcion == "Gráficos":
     # TIPO DE ACCIDENTE
     # ==========================================
 
-    if "Tipo de accidente" in df.columns:
+    if "Tipo_Accidente" in df.columns:
 
         st.subheader("🚗 Distribución por Tipo de Accidente")
 
         accidentes = (
-            df["Tipo de accidente"]
+            df["Tipo_Accidente"]
             .value_counts()
             .head(10)
         )
@@ -413,12 +564,12 @@ elif opcion == "Gráficos":
     # GÉNERO DE LA VÍCTIMA
     # ==========================================
 
-    if "Género de la víctima" in df.columns:
+    if "Genero_Victima" in df.columns:
 
         st.subheader("👥 Fallecidos por Género")
 
         genero = (
-            df["Género de la víctima"]
+            df["Genero_Victima"]
             .value_counts()
         )
 
@@ -445,20 +596,20 @@ elif opcion == "Gráficos":
     # Gráfico de Líneas
     # Evolución de Fallecidos por Accidentes de Tránsito por Año
     # ==========================================
-    
+
     st.subheader("📈 Evolución de Fallecidos por Accidentes de Tránsito por Año")
 
-    df["Fecha de muerte Víctima"] = pd.to_datetime(
-    df["Fecha de muerte Víctima"],
+    df["Fecha_Muerte"] = pd.to_datetime(
+    df["Fecha_Muerte"],
     errors="coerce"
-    )
+)
 
     anios = (
-    df["Fecha de muerte Víctima"]
+    df["Fecha_Muerte"]
     .dt.year
     .value_counts()
     .sort_index()
-    )
+)
 
     fig5 = px.line(
     x=anios.index,
@@ -471,13 +622,13 @@ elif opcion == "Gráficos":
     xaxis_title="Año",
     yaxis_title="Número de Fallecidos",
     height=500
- )
+)
 
     st.plotly_chart(
     fig5,
     use_container_width=True
- )
-   
+)
+
 # =====================================================
 # YDATA PROFILING
 # =====================================================
